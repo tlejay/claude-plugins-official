@@ -889,7 +889,10 @@ client.on('interactionCreate', async (interaction: Interaction) => {
 })
 
 client.on('messageCreate', msg => {
-  if (msg.author.bot) return
+  // MINT-PATCH 2026-05-19: allow webhook posts (e.g. github-issue-notifier) through to gate(),
+  // which still enforces allowFrom on author.id (= webhook_id for webhook posts).
+  // Non-webhook bots are still skipped to avoid feedback loops.
+  if (msg.author.bot && !msg.webhookId) return
   handleInbound(msg).catch(e => process.stderr.write(`discord: handleInbound failed: ${e}\n`))
 })
 
