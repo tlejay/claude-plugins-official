@@ -811,8 +811,27 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     const chat_id = interaction.channelId ?? ''
     const message_id = interaction.message.id
     const ts = new Date().toISOString()
-    // Acknowledge without modifying the message (keeps buttons visible).
-    await interaction.deferUpdate().catch(() => {})
+    // Acknowledge with visual feedback: disable all buttons in this message,
+    // and mark the clicked one with ✓ so the user sees which one they picked.
+    // Fall back to deferUpdate() if the rebuild/update fails for any reason.
+    try {
+      const updatedRows: ActionRowBuilder<ButtonBuilder>[] = (interaction.message.components as any[]).map((row: any) => {
+        const newRow = new ActionRowBuilder<ButtonBuilder>()
+        if (row.type !== 1) return newRow
+        for (const c of row.components) {
+          if (c.type !== 2) continue
+          const btn = ButtonBuilder.from(c).setDisabled(true)
+          if (c.customId === interaction.customId && c.label) {
+            btn.setLabel(`✓ ${c.label}`)
+          }
+          newRow.addComponents(btn)
+        }
+        return newRow
+      })
+      await interaction.update({ components: updatedRows })
+    } catch {
+      await interaction.deferUpdate().catch(() => {})
+    }
     mcp.notification({
       method: 'notifications/claude/channel',
       params: {
