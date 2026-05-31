@@ -1,0 +1,107 @@
+name: upstream-watch
+
+# Daily check: did anthropics/claude-plugins-official touch external_plugins/discord/
+# (or marketplace.json's discord entry) since the last commit we have on
+# feat/reply-components? If yes, open or update a tracking issue in tlejay/mint
+# (which already routes new issues into the Mint Discord channel via the
+# github-issue-notifier webhook). Idempotent: one rolling open issue keyed by
+# a stable title prefix; closes itself if upstream matches our branch again.
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 02:00 UTC = 09:00 Asia/Bangkok
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: feat/reply-components
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/anthropics/claude-plugins-official.git
+          git fetch upstream main --no-tags
+
+      - name: Diff upstream changes in discord plugin
+        id: diff
+        run: |
+          set -euo pipefail
+          # Commits in upstream/main not in our branch, touching discord plugin path.
+          NEW_COMMITS=$(git log --oneline feat/reply-components..upstream/main -- external_plugins/discord/ || true)
+          echo "new_commit_count=$(echo "$NEW_COMMITS" | grep -c . || true)" >> "$GITHUB_OUTPUT"
+          {
+            echo 'new_commits<<COMMITS_EOF'
+            echo "$NEW_COMMITS"
+            echo 'COMMITS_EOF'
+          } >> "$GITHUB_OUTPUT"
+          UPSTREAM_SHA=$(git rev-parse upstream/main)
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update tracking issue in tlejay/mint
+        if: steps.diff.outputs.new_commit_count != '0' && steps.diff.outputs.new_commit_count != ''
+        env:
+          GH_TOKEN: ${{ secrets.MINT_REPO_ISSUE_TOKEN }}
+          NEW_COMMITS: ${{ steps.diff.outputs.new_commits }}
+          UPSTREAM_SHA: ${{ steps.diff.outputs.upstream_sha }}
+          COMMIT_COUNT: ${{ steps.diff.outputs.new_commit_count }}
+        run: |
+          set -euo pipefail
+          TITLE_PREFIX="upstream-watch: anthropics/claude-plugins-official discord plugin has new commits"
+          BODY=$(cat <<EOF
+          ## Upstream activity detected
+
+          anthropics/claude-plugins-official \`main\` is at \`${UPSTREAM_SHA}\` and has **${COMMIT_COUNT}** commit(s) touching \`external_plugins/discord/\` that are not in tlejay/claude-plugins-official \`feat/reply-components\`.
+
+          ### Commits to review
+          \`\`\`
+          ${NEW_COMMITS}
+          \`\`\`
+
+          ### Next steps
+          1. Pull the diff locally: \`cd ~/~\ Vibe\ Code/claude-plugins-official && git fetch upstream && git log feat/reply-components..upstream/main -- external_plugins/discord/\`
+          2. Decide whether to rebase or cherry-pick.
+          3. If our patch anchors (\`MINT-PATCH\`, button feedback hunk) still apply cleanly: rebase. If anchors broke: review + redo.
+          4. Close this issue when the fork is up to date.
+
+          _This issue is opened automatically by \`upstream-watch.yml\` in the fork. The workflow updates the same issue if the commit list changes, and closes it when the fork matches upstream._
+          EOF
+          )
+          EXISTING=$(gh issue list \
+            --repo tlejay/mint \
+            --search "in:title \"${TITLE_PREFIX}\" is:open" \
+            --json number,title \
+            --jq '.[0].number' || true)
+          if [ -n "${EXISTING:-}" ]; then
+            gh issue edit "$EXISTING" --repo tlejay/mint --body "$BODY"
+            echo "Updated issue #$EXISTING"
+          else
+            gh issue create \
+              --repo tlejay/mint \
+              --title "$TITLE_PREFIX" \
+              --body "$BODY" \
+              --label "upstream-sync,priority/should,status/backlog"
+          fi
+
+      - name: Close stale tracking issue when caught up
+        if: steps.diff.outputs.new_commit_count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.MINT_REPO_ISSUE_TOKEN }}
+        run: |
+          set -euo pipefail
+          TITLE_PREFIX="upstream-watch: anthropics/claude-plugins-official discord plugin has new commits"
+          EXISTING=$(gh issue list \
+            --repo tlejay/mint \
+            --search "in:title \"${TITLE_PREFIX}\" is:open" \
+            --json number \
+            --jq '.[0].number' || true)
+          if [ -n "${EXISTING:-}" ]; then
+            gh issue close "$EXISTING" --repo tlejay/mint --comment "Fork caught up with upstream. Auto-closed by upstream-watch."
+          fi

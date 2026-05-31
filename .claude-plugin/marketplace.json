@@ -1,10 +1,10 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "claude-plugins-official",
-  "description": "Directory of popular Claude Code extensions including development tools, productivity plugins, and MCP integrations",
+  "name": "mint-plugins",
+  "description": "tlejay's fork of anthropics/claude-plugins-official. Same plugin set; the discord plugin carries Mint's local patches (button visual feedback, AskUserQuestion-style components, webhook posts accepted by gate). Track upstream via .github/workflows/upstream-watch.yml; see CONTRIBUTING in tlejay/mint for sync runbook.",
   "owner": {
-    "name": "Anthropic",
-    "email": "support@anthropic.com"
+    "name": "tlejay",
+    "email": "noreply@github.com"
   },
   "plugins": [
     {
