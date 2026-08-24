@@ -2,10 +2,15 @@ name: upstream-watch
 
 # Daily check: did anthropics/claude-plugins-official touch external_plugins/discord/
 # (or marketplace.json's discord entry) since the last commit we have on
-# feat/reply-components? If yes, open or update a tracking issue in tlejay/mint
-# (which already routes new issues into the Mint Discord channel via the
-# github-issue-notifier webhook). Idempotent: one rolling open issue keyed by
-# a stable title prefix; closes itself if upstream matches our branch again.
+# feat/reply-components? If yes, open or update a tracking issue in THIS repo.
+# Idempotent: one rolling open issue keyed by a stable title prefix; closes
+# itself if upstream matches our branch again.
+#
+# It used to file the issue in tlejay/mint, which needed a cross-repo PAT in
+# secrets.MINT_REPO_ISSUE_TOKEN. That secret was never created, so every run
+# from 2026-08-20 died at the issue step with exit 4 while the watch itself
+# worked fine. Filing in this repo means the built-in github.token is enough
+# (Tle's call, 2026-08-24).
 
 on:
   schedule:
@@ -14,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   watch:
@@ -45,10 +51,10 @@ jobs:
           UPSTREAM_SHA=$(git rev-parse upstream/main)
           echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Open or update tracking issue in tlejay/mint
+      - name: Open or update tracking issue
         if: steps.diff.outputs.new_commit_count != '0' && steps.diff.outputs.new_commit_count != ''
         env:
-          GH_TOKEN: ${{ secrets.MINT_REPO_ISSUE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           NEW_COMMITS: ${{ steps.diff.outputs.new_commits }}
           UPSTREAM_SHA: ${{ steps.diff.outputs.upstream_sha }}
           COMMIT_COUNT: ${{ steps.diff.outputs.new_commit_count }}
@@ -71,37 +77,37 @@ jobs:
           3. If our patch anchors (\`MINT-PATCH\`, button feedback hunk) still apply cleanly: rebase. If anchors broke: review + redo.
           4. Close this issue when the fork is up to date.
 
-          _This issue is opened automatically by \`upstream-watch.yml\` in the fork. The workflow updates the same issue if the commit list changes, and closes it when the fork matches upstream._
+          _This issue is opened automatically by \`upstream-watch.yml\` in this repo. The workflow updates the same issue if the commit list changes, and closes it when the fork matches upstream._
           EOF
           )
           EXISTING=$(gh issue list \
-            --repo tlejay/mint \
+            --repo "$GITHUB_REPOSITORY" \
             --search "in:title \"${TITLE_PREFIX}\" is:open" \
             --json number,title \
             --jq '.[0].number' || true)
           if [ -n "${EXISTING:-}" ]; then
-            gh issue edit "$EXISTING" --repo tlejay/mint --body "$BODY"
+            gh issue edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
             echo "Updated issue #$EXISTING"
           else
             gh issue create \
-              --repo tlejay/mint \
+              --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE_PREFIX" \
               --body "$BODY" \
-              --label "upstream-sync,priority/should,status/backlog"
+              --label "upstream-sync"
           fi
 
       - name: Close stale tracking issue when caught up
         if: steps.diff.outputs.new_commit_count == '0'
         env:
-          GH_TOKEN: ${{ secrets.MINT_REPO_ISSUE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TITLE_PREFIX="upstream-watch: anthropics/claude-plugins-official discord plugin has new commits"
           EXISTING=$(gh issue list \
-            --repo tlejay/mint \
+            --repo "$GITHUB_REPOSITORY" \
             --search "in:title \"${TITLE_PREFIX}\" is:open" \
             --json number \
             --jq '.[0].number' || true)
           if [ -n "${EXISTING:-}" ]; then
-            gh issue close "$EXISTING" --repo tlejay/mint --comment "Fork caught up with upstream. Auto-closed by upstream-watch."
+            gh issue close "$EXISTING" --repo "$GITHUB_REPOSITORY" --comment "Fork caught up with upstream. Auto-closed by upstream-watch."
           fi
